@@ -1,6 +1,6 @@
 use crate::{AGT_NO_DROP, AppDeviceInfo, DevicePath, drmVersion, stat, xdna, VramUsage};
 use crate::AMDGPU::{DeviceHandle, GPU_INFO, GpuMetrics, MetricsInfo, RasBlock, RasErrorCount};
-use stat::{FdInfoStat, GpuActivity, Sensors, PcieBw, PerfCounter, ProcInfo};
+use stat::{FdInfoStat, GpuActivity, KfdStat, Sensors, PcieBw, PerfCounter, ProcInfo};
 use xdna::{amdxdna_drm_get_resource_info, XdnaFdInfoStat};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -153,6 +153,7 @@ impl AppAmdgpuTop {
             has_vcn: device_info.has_vcn(),
             has_vcn_unified: device_info.has_vcn_unified(),
             has_vpe: device_info.has_vpe(),
+            kfd: device_path.get_kfd_node().map(KfdStat::new),
             ..Default::default()
         };
         let xdna_fdinfo = XdnaFdInfoStat::default();
@@ -394,6 +395,8 @@ impl AppAmdgpuTop {
     }
 
     pub fn update_pc(&mut self) {
+        self.stat.fdinfo.sample_kfd_usage();
+
         if self.dynamic_no_pc || self.to_d3hot { return }
 
         self.stat.grbm.read_reg(&self.amdgpu_dev);

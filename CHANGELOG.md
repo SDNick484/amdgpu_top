@@ -1,4 +1,15 @@
 # Changelog
+## Unreleased
+ * add per-process KFD CU occupancy (`CU%`) from `/sys/class/kfd/kfd/proc/<pid>/stats_<gpu_id>/cu_occupancy`
+ * add `KfdNode`, `KfdStat`, `KfdUsage` and `DevicePath::get_kfd_node`
+ * add `ProcUsage::kfd`, `FdInfoStat::kfd` and `FdInfoSortType::KfdCU`
+
+### TUI/SMI/GUI
+ * add the `CU%` column to the fdinfo list
+
+### JSON
+ * add `kfd` (`CU_Occupancy`, `VRAM`) to each process in `fdinfo`
+
 ## 0.11.0 (2025-09-02)
  * fix Appstream metainfo by @malfisya
  * fix the process to get gpu_metrics when resuming from suspended state

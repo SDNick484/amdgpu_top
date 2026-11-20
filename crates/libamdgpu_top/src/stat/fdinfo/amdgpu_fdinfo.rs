@@ -4,7 +4,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::time::Duration;
 use super::ProcInfo;
-use crate::stat;
+use crate::stat::{self, KfdStat, KfdUsage};
 
 // ref: drivers/gpu/drm/amd/amdgpu/amdgpu_fdinfo.c
 
@@ -357,6 +357,7 @@ pub struct ProcUsage {
     pub ids_count: usize,
     pub usage: FdInfoUsage,
     pub is_kfd_process: bool,
+    pub kfd: KfdUsage,
 }
 
 #[derive(Clone, Default)]
@@ -368,6 +369,8 @@ pub struct FdInfoStat {
     pub has_vcn: bool,
     pub has_vcn_unified: bool,
     pub has_vpe: bool,
+    /// KFD topology node of the GPU, `None` if the GPU has no KFD node.
+    pub kfd: Option<KfdStat>,
 }
 
 impl FdInfoStat {
@@ -533,6 +536,7 @@ impl FdInfoStat {
             ids_count,
             usage,
             is_kfd_process: proc_info.is_kfd_proc,
+            kfd: KfdUsage::default(),
         });
     }
 
@@ -559,6 +563,49 @@ impl FdInfoStat {
         for pu in proc_index {
             self.get_proc_usage(pu);
         }
+
+        self.update_kfd_usage();
+    }
+
+    /// Sample cu_occupancy of the KFD processes.
+    /// This is for the sampling loop (e.g. with the performance counters),
+    /// it does nothing if the last sample is too recent.
+    pub fn sample_kfd_usage(&mut self) {
+        let Some(kfd) = self.kfd.as_mut() else { return };
+
+        if !kfd.is_sample_due() {
+            return;
+        }
+
+        kfd.sample(
+            self.proc_usage
+                .iter()
+                .filter(|pu| pu.is_kfd_process)
+                .map(|pu| pu.pid),
+        );
+    }
+
+    // The samples of the sampling loop and a sample at this point are averaged.
+    // Without the sampling loop, this is the instantaneous value.
+    fn update_kfd_usage(&mut self) {
+        let Some(kfd) = self.kfd.as_mut() else { return };
+
+        kfd.sample(
+            self.proc_usage
+                .iter()
+                .filter(|pu| pu.is_kfd_process)
+                .map(|pu| pu.pid),
+        );
+
+        for pu in self.proc_usage.iter_mut().filter(|pu| pu.is_kfd_process) {
+            pu.kfd = kfd.usage(pu.pid);
+        }
+
+        kfd.clear_samples();
+    }
+
+    pub fn has_kfd_usage(&self) -> bool {
+        self.kfd.is_some()
     }
 
     pub fn fold_fdinfo_usage(&self) -> (FdInfoUsage, bool, bool, bool) {
@@ -590,5 +637,85 @@ impl FdInfoStat {
             .proc_usage
             .iter()
             .any(|pu| pu.is_kfd_process)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::stat::{FdInfoSortType, KfdNode};
+
+    #[test]
+    fn kfd_usage_per_process() {
+        let root =
+            std::env::temp_dir().join(format!("amdgpu_top_fdinfo_kfd_{}", std::process::id()));
+        let _ = fs::remove_dir_all(&root);
+        // pid 100: occupancy, pid 200: no cu_occupancy (older kernel), pid 300: not a KFD process
+        for (path, s) in [
+            ("proc/100/stats_7/cu_occupancy", "2\n"),
+            ("proc/100/vram_7", "2097152\n"),
+            ("proc/200/vram_7", "1048576\n"),
+            ("proc/300/stats_7/cu_occupancy", "8\n"),
+        ] {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().unwrap()).unwrap();
+            fs::write(path, s).unwrap();
+        }
+
+        let proc_usage =
+            [(100, true), (200, true), (300, false)].map(|(pid, is_kfd_process)| ProcUsage {
+                pid,
+                is_kfd_process,
+                ..Default::default()
+            });
+        let mut stat = FdInfoStat {
+            kfd: Some(KfdStat::with_root(
+                KfdNode {
+                    gpu_id: 7,
+                    cu_count: 8,
+                },
+                &root,
+            )),
+            proc_usage: proc_usage.to_vec(),
+            ..Default::default()
+        };
+
+        assert!(stat.has_kfd_usage());
+        stat.update_kfd_usage();
+
+        let [p100, p200, p300] = [0, 1, 2].map(|i| stat.proc_usage[i].kfd);
+        assert_eq!(
+            p100,
+            KfdUsage {
+                cu_occupancy: Some(25),
+                vram_usage: Some(2048)
+            }
+        );
+        assert_eq!(
+            p200,
+            KfdUsage {
+                cu_occupancy: None,
+                vram_usage: Some(1024)
+            }
+        );
+        // never read for processes that do not use KFD
+        assert_eq!(p300, KfdUsage::default());
+
+        stat.sort_proc_usage(FdInfoSortType::KfdCU, false);
+        assert_eq!(stat.proc_usage.iter().map(|pu| pu.pid).next(), Some(100));
+
+        // the GPU has no KFD node
+        let mut stat = FdInfoStat {
+            proc_usage: proc_usage.to_vec(),
+            ..Default::default()
+        };
+        assert!(!stat.has_kfd_usage());
+        stat.update_kfd_usage();
+        assert!(stat
+            .proc_usage
+            .iter()
+            .all(|pu| pu.kfd == KfdUsage::default()));
+
+        let _ = fs::remove_dir_all(&root);
     }
 }

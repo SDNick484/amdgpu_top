@@ -5,6 +5,7 @@ use super::FdInfoStat;
 pub enum FdInfoSortType {
     PID,
     KFD,
+    KfdCU, // KFD CU occupancy
     #[default]
     VRAM,
     GTT,
@@ -27,6 +28,8 @@ impl FdInfoStat {
                 (FdInfoSortType::PID, true) => a.pid.cmp(&b.pid),
                 (FdInfoSortType::KFD, false) => b.is_kfd_process.cmp(&a.is_kfd_process),
                 (FdInfoSortType::KFD, true) => a.is_kfd_process.cmp(&b.is_kfd_process),
+                (FdInfoSortType::KfdCU, false) => b.kfd.cu_occupancy.cmp(&a.kfd.cu_occupancy),
+                (FdInfoSortType::KfdCU, true) => a.kfd.cu_occupancy.cmp(&b.kfd.cu_occupancy),
                 (FdInfoSortType::VRAM, false) => b.usage.vram_usage.cmp(&a.usage.vram_usage),
                 (FdInfoSortType::VRAM, true) => a.usage.vram_usage.cmp(&b.usage.vram_usage),
                 (FdInfoSortType::GTT, false) => b.usage.gtt_usage.cmp(&a.usage.gtt_usage),
