@@ -180,6 +180,25 @@ Graphics Translation Tables.
 ### KFD
 The process of using the AMDKFD driver.
 
+#### CU%
+Compute Unit (CU) occupancy of the process using the AMDKFD driver (ROCm/HIP), as a percentage of all CUs of the GPU.  
+This is read from `/sys/class/kfd/kfd/proc/<pid>/stats_<gpu_id>/cu_occupancy`, not from fdinfo, so it is shown apart from `Compute/COMP`.  
+The value is the average of the samples taken during the update interval (without the sampling of the performance counters, e.g. `--no-pc` or SMI mode, it is an instantaneous value).  
+`N/A` (`null` in JSON) means that the kernel does not provide `cu_occupancy` for the process, it is not 0%.  
+The column is shown if the GPU has the KFD topology node, and is also in the JSON output as `kfd` (`CU_Occupancy`, and `VRAM` from `vram_<gpu_id>`) of each process in `fdinfo`.
+
+Kernel support for `cu_occupancy`:
+
+| GPU family                    | Linux Kernel |
+|-------------------------------|--------------|
+| CDNA gfx908 (MI100)           | 5.11+        |
+| CDNA 2 gfx90a (MI200)         | 6.2+         |
+| CDNA 3 gfx942 (MI300)         | 6.6+         |
+| RDNA 3, RDNA 4                | 7.3+         |
+| RDNA 1, RDNA 2                | 7.4+         |
+
+It also works on gfx1152 (RDNA 3.5).
+
 #### GFX
 GFX engine.
 

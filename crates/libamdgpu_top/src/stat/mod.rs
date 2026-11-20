@@ -112,6 +112,9 @@ pub use gfxoff_state::*;
 mod gpu_activity;
 pub use gpu_activity::*;
 
+mod kfd;
+pub use kfd::*;
+
 pub mod gpu_metrics_util;
 
 pub(crate) fn parse_hwmon<T: std::str::FromStr, P: Into<std::path::PathBuf>>(path: P) -> Option<T> {

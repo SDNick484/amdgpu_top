@@ -224,12 +224,32 @@ impl FdInfoJson for ProcUsage {
     }
 }
 
+// null: not a KFD process, or the GPU has no KFD topology node.
+// The values are null if the kernel does not provide them (e.g. cu_occupancy of an older kernel).
+fn kfd_json(pu: &ProcUsage, has_kfd_usage: bool) -> Value {
+    if !pu.is_kfd_process || !has_kfd_usage {
+        return Value::Null;
+    }
+
+    json!({
+        "CU_Occupancy": pu.kfd.cu_occupancy.map(|cu| json!({
+            "value": cu,
+            "unit": "%",
+        })),
+        "VRAM": pu.kfd.vram_usage.map(|vram| json!({
+            "value": vram >> 10,
+            "unit": "MiB",
+        })),
+    })
+}
+
 impl OutputJson for FdInfoStat {
     fn json(&self) -> Value {
         let mut m = Map::new();
         let has_vcn = self.has_vcn;
         let has_vcn_unified = self.has_vcn_unified;
         let has_vpe = self.has_vpe;
+        let has_kfd_usage = self.has_kfd_usage();
 
         for pu in &self.proc_usage {
             m.insert(
@@ -237,6 +257,7 @@ impl OutputJson for FdInfoStat {
                 json!({
                     "name": pu.name,
                     "usage": pu.usage_json(has_vcn, has_vcn_unified, has_vpe),
+                    "kfd": kfd_json(pu, has_kfd_usage),
                 }),
             );
         }
