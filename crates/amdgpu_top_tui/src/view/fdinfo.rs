@@ -19,6 +19,7 @@ const ENC_LABEL: &str = "ENC";
 const VCN_UNIFIED_LABEL: &str = "VCNU";
 const VPE_LABEL: &str = "VPE";
 const KFD_LABEL: &str = "KFD";
+const KFD_CU_LABEL: &str = "CU%";
 // const UVD_ENC_LABEL: &str = "UVD (ENC)";
 // const JPEG_LABEL: &str = "JPEG";
 
@@ -37,9 +38,18 @@ impl AppTextView {
 
         write!(
             self.text.buf,
-            " {proc_name:<PROC_NAME_LEN$}|{pid:^PID_MAX_LEN$}|{KFD_LABEL}|{VRAM_LABEL:^6}|{GTT_LABEL:^6}|{CPU_LABEL:^4}|{GFX_LABEL:^4}|{COMPUTE_LABEL:^4}|{DMA_LABEL:^4}|",
+            " {proc_name:<PROC_NAME_LEN$}|{pid:^PID_MAX_LEN$}|{KFD_LABEL}|",
             proc_name = "Name",
             pid = "PID",
+        )?;
+
+        if stat.has_kfd_usage() {
+            write!(self.text.buf, "{KFD_CU_LABEL:^4}|")?;
+        }
+
+        write!(
+            self.text.buf,
+            "{VRAM_LABEL:^6}|{GTT_LABEL:^6}|{CPU_LABEL:^4}|{GFX_LABEL:^4}|{COMPUTE_LABEL:^4}|{DMA_LABEL:^4}|",
         )?;
 
         if stat.has_vcn_unified {
@@ -71,10 +81,24 @@ impl AppTextView {
             };
             write!(
                 self.text.buf,
-                " {name:name_len$}|{pid:>PID_MAX_LEN$}|{kfd:^3}|{vram:>5}M|{gtt:>5}M|",
+                " {name:name_len$}|{pid:>PID_MAX_LEN$}|{kfd:^3}|",
                 name = pu.name,
                 pid = pu.pid,
                 kfd = if pu.is_kfd_process { "Y" } else { "" },
+            )?;
+
+            if stat.has_kfd_usage() {
+                // blank: not a KFD process, N/A: the kernel does not provide cu_occupancy
+                match (pu.is_kfd_process, pu.kfd.cu_occupancy) {
+                    (_, Some(cu)) => write!(self.text.buf, "{cu:>3}%|")?,
+                    (true, None) => write!(self.text.buf, "{:>4}|", "N/A")?,
+                    (false, None) => write!(self.text.buf, "{:4}|", "")?,
+                }
+            }
+
+            write!(
+                self.text.buf,
+                "{vram:>5}M|{gtt:>5}M|",
                 vram = pu.usage.vram_usage >> 10,
                 gtt = pu.usage.gtt_usage >> 10,
             )?;
@@ -174,5 +198,70 @@ impl AppTextView {
             let mut opt = siv.user_data::<Opt>().unwrap().lock().unwrap();
             opt.fdinfo_sort = FdInfoSortType::VCNU;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use libamdgpu_top::stat::{KfdNode, KfdStat, KfdUsage, ProcUsage};
+
+    fn print(stat: &mut FdInfoStat) -> Vec<String> {
+        let mut view = AppTextView::default();
+        view.print_fdinfo(stat, FdInfoSortType::PID, true).unwrap();
+
+        view.text.buf.lines().map(str::to_string).collect()
+    }
+
+    #[test]
+    fn kfd_cu_column() {
+        let proc_usage = vec![
+            ProcUsage {
+                pid: 1,
+                name: "hip".to_string(),
+                is_kfd_process: true,
+                kfd: KfdUsage {
+                    cu_occupancy: Some(99),
+                    vram_usage: None,
+                },
+                ..Default::default()
+            },
+            ProcUsage {
+                pid: 2,
+                name: "old_kernel".to_string(),
+                is_kfd_process: true,
+                ..Default::default()
+            },
+            ProcUsage {
+                pid: 3,
+                name: "game".to_string(),
+                ..Default::default()
+            },
+        ];
+        let mut stat = FdInfoStat {
+            kfd: Some(KfdStat::new(KfdNode {
+                gpu_id: 1,
+                cu_count: 8,
+            })),
+            proc_usage,
+            ..Default::default()
+        };
+
+        let lines = print(&mut stat);
+        let cols: Vec<Vec<&str>> = lines.iter().map(|l| l.split('|').collect()).collect();
+
+        assert_eq!(cols[0][3], "CU% ");
+        assert_eq!(cols[1][3], " 99%");
+        assert_eq!(cols[2][3], " N/A"); // not 0%
+        assert_eq!(cols[3][3], "    ");
+        // the same columns as without KFD
+        assert_eq!(cols[0].len(), cols[1].len());
+
+        // no KFD node: no column
+        stat.kfd = None;
+        let lines = print(&mut stat);
+
+        assert!(!lines[0].contains("CU%"));
+        assert_eq!(lines[1].split('|').count(), cols[1].len() - 1);
     }
 }

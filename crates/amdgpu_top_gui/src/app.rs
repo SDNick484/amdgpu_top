@@ -217,6 +217,8 @@ impl MyApp {
     }
 
     pub fn egui_fdinfo_list(&mut self, ui: &mut egui::Ui, has_vcn_unified: bool, has_vpe: bool) {
+        let has_kfd_usage = self.buf_data.stat.fdinfo.has_kfd_usage();
+
         {
             let vis = ui.visuals_mut();
             vis.striped = true;
@@ -228,6 +230,7 @@ impl MyApp {
             for (s, align, sort_type, flag) in [
                 (fl!("pid"), 8, FdInfoSortType::PID, true),
                 ("KFD".to_string(), 3, FdInfoSortType::KFD, true),
+                ("CU%".to_string(), 5, FdInfoSortType::KfdCU, has_kfd_usage),
                 (fl!("vram"), 10, FdInfoSortType::VRAM, true),
                 (fl!("gtt"), 10, FdInfoSortType::GTT, true),
                 (fl!("cpu"), 5, FdInfoSortType::CPU, true),
@@ -265,6 +268,14 @@ impl MyApp {
                 ui.label(pu.name.to_string());
                 ui.label(format!("{:>8}", pu.pid));
                 ui.label(if pu.is_kfd_process { " Y " } else { "" });
+                if has_kfd_usage {
+                    // blank: not a KFD process, N/A: the kernel does not provide cu_occupancy
+                    ui.label(match (pu.is_kfd_process, pu.kfd.cu_occupancy) {
+                        (_, Some(cu)) => format!("{cu:3} %"),
+                        (true, None) => "N/A".to_string(),
+                        (false, None) => String::new(),
+                    });
+                }
                 ui.label(format!("{:5} {mib}", pu.usage.vram_usage >> 10));
                 ui.label(format!("{:5} {mib}", pu.usage.gtt_usage >> 10));
                 for usage in [

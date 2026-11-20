@@ -8,7 +8,7 @@ use crate::{
     PCI,
 };
 use crate::AGT_NO_DROP;
-use crate::stat::ProcInfo;
+use crate::stat::{KFD_SYSFS_PATH, KfdNode, ProcInfo};
 use std::path::PathBuf;
 use std::fs;
 use std::fmt;
@@ -106,6 +106,15 @@ impl DevicePath {
             self.device_name = AMDGPU::find_device_name(did, rid)
                 .unwrap_or(AMDGPU::DEFAULT_DEVICE_NAME.to_string());
         }
+    }
+
+    /// Find the KFD topology node of the device.
+    pub fn get_kfd_node(&self) -> Option<KfdNode> {
+        const PRE: &str = "/dev/dri/renderD";
+        let render = self.render.to_str()?;
+        let drm_render_minor = render.strip_prefix(PRE)?.parse().ok()?;
+
+        KfdNode::find(KFD_SYSFS_PATH, drm_render_minor)
     }
 
     pub fn get_gfx_target_version_from_kfd(&self) -> Option<GfxTargetVersion> {
